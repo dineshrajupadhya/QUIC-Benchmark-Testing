@@ -1,7 +1,7 @@
 # QUIC Protocol Interoperability & Benchmark Testing Report
 
 **Author:** Dinesh Raj Upadhya  
-**Date:** September 10, 2026  
+**Date:** September 16, 2026  
 **Reference:** RFC 9000 - QUIC: A UDP-Based Multiplexed and Secure Transport
 
 ---
@@ -16,6 +16,7 @@
 6. [Results & Analysis](#6-results--analysis)
 7. [Conclusion](#7-conclusion)
 8. [References](#8-references)
+9. [MoQ Pub/Sub Implementation](#9-moq-media-over-quic-pubsub-implementation)
 
 ---
 
@@ -375,6 +376,7 @@ During the testing process, several issues were encountered and resolved:
 | ngtcp2 (C QUIC) | ✅ Installed |
 | Interoperability testing | ✅ PASSED |
 | Benchmark testing | ✅ Complete |
+| MoQ Pub/Sub (10000 messages) | ✅ Complete |
 
 ### Key Findings
 
@@ -434,4 +436,128 @@ The following screenshots document the testing process:
 
 **Report Prepared By:** Dinesh Raj Upadhya  
 **Email:** dineshrajupadhya86@gmail.com  
-**Date:** September 10, 2026
+**Date:** September 16, 2026
+
+---
+
+
+
+---
+
+## 9. MoQ (Media over QUIC) Pub/Sub Implementation
+
+### 9.1 Overview
+
+Media over QUIC (MoQ) is a real-time media delivery protocol built on top of QUIC. This section documents the implementation of a MoQ-style Publish/Subscribe system using the topic dinesh/in, where the publisher sends 10,000 sequential messages (1-10000) and the subscriber receives them in order.
+
+### 9.2 Objectives
+
+1. Implement a MoQ-style pub/sub system using QUIC transport
+2. Publish messages 1-10000 on topic dinesh/in
+3. Subscribe and receive all messages in correct sequence
+4. Verify message integrity and ordering
+
+### 9.3 Architecture
+
+`
+Publisher (Server)                    Subscriber (Client)
+      |                                      |
+      |    QUIC Connection (port 4434)       |
+      +--------------------------------------+
+      |                                      |
+      |  Topic: dinesh/in                    |
+      |  Messages: 1, 2, 3... 10000          |
+      |                                      |
+      |  ----------------------------->      |
+      |       10000 messages sent            |
+      |                                      |
+      |                    Total received: 10000
+      |                    Sequence: CORRECT
+`
+
+### 9.4 Implementation
+
+**Server (Publisher) - moq_server.py:**
+- Listens on port 4434 via QUIC
+- Publishes 10,000 messages on topic dinesh/in
+- Prints every 1000th message for progress tracking
+
+**Client (Subscriber) - moq_client.py:**
+- Connects to server on port 4434
+- Subscribes to topic dinesh/in
+- Receives and validates all 10,000 messages in sequence
+
+### 9.5 Test Results
+
+**Execution:**
+`ash
+# Terminal 1 - Start Publisher
+source ~/quic-env/bin/activate
+cd ~/QUIC-Benchmark-Testing
+python3 moq_server.py
+
+# Terminal 2 - Run Subscriber
+source ~/quic-env/bin/activate
+cd ~/QUIC-Benchmark-Testing
+python3 moq_client.py
+`
+
+**Server Output:**
+`
+=== MoQ Pub/Sub Server ===
+Topic: dinesh/in
+Waiting for subscriber on port 4434...
+[Server] Subscriber connected for topic: dinesh/in
+[Server] Starting to publish 1-10000 on topic: dinesh/in
+[Server] Sent: 1000
+[Server] Sent: 2000
+...
+[Server] Sent: 10000
+[Server] Done! Published 10000 messages.
+`
+
+**Client Output:**
+`
+=== MoQ Pub/Sub Client ===
+Connecting to server...
+[Client] Subscribed to topic: dinesh/in
+[Client] Waiting for messages...
+[Client] Received: 1
+[Client] Received: 2
+[Client] Received: 3
+[Client] Received: 4
+[Client] Received: 5
+[Client] Received: 1000
+...
+[Client] Received: 10000
+
+============ RESULTS ============
+Total received: 10000
+First: 1
+Last: 10000
+Sequence check: CORRECT (1 to 10000 in order)
+`
+
+**Result:** PASSED
+
+### 9.6 Performance Metrics
+
+| Metric | Value |
+|--------|-------|
+| Total Messages | 10,000 |
+| Topic | dinesh/in |
+| Port | 4434 (QUIC) |
+| Sequence Check | CORRECT |
+| Message Order | Sequential (1-10000) |
+| Protocol | QUIC with TLS 1.3 |
+
+### 9.7 Key Observations
+
+1. **Ordered Delivery** - All 10,000 messages received in correct sequence
+2. **Reliable Transport** - No message loss despite UDP underlying protocol
+3. **Fast Setup** - QUIC connection established quickly
+4. **Clean Disconnect** - Both server and client terminated gracefully
+
+---
+
+**Report Updated:** September 16, 2026
