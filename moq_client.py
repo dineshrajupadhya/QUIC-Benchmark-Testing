@@ -1,57 +1,122 @@
 import asyncio
-import json
-from aioquic.asyncio import connect
-from aioquic.asyncio.protocol import QuicConnectionProtocol
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from aioquic.asyncio import QuicConnectionProtocol, connect
 from aioquic.quic.configuration import QuicConfiguration
-from aioquic.quic.events import QuicEvent, StreamDataReceived
+from aioquic.quic.events import StreamDataReceived
+from moq_protocol import (
+    MoqMessageParser, ClientSetup, SubscribeRequest, PublishOk,
+    MessageType, FilterType, MOQT_VERSION_1
+)
+
+HOST = '127.0.0.1'
+PORT = 4434
+TOPIC = 'dinesh/in'
+CERT_FILE = '/tmp/aioquic/examples/cert.pem'
+events = asyncio.Queue()
+
 
 class MoQClient(QuicConnectionProtocol):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.received = []
-        self.buffer = ''
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.buf = bytearray()
 
-    def quic_event_received(self, event: QuicEvent):
+    def quic_event_received(self, event):
         if isinstance(event, StreamDataReceived):
-            self.buffer += event.data.decode()
-            while '\n' in self.buffer:
-                line, self.buffer = self.buffer.split('\n', 1)
-                if line.strip():
-                    try:
-                        msg = json.loads(line.strip())
-                        seq = msg.get('seq')
-                        val = msg.get('val')
-                        if seq is not None:
-                            self.received.append(seq)
-                            if len(self.received) <= 5 or len(self.received) % 1000 == 0 or len(self.received) == 10000:
-                                print(f'[Client] Received: {val}')
-                    except json.JSONDecodeError:
-                        pass
+            self.buf.extend(event.data)
+            self._parse()
+
+    def _parse(self):
+        while len(self.buf) >= 2:
+            try:
+                msg, consumed = MoqMessageParser.parse(bytes(self.buf))
+                self.buf = self.buf[consumed:]
+                events.put_nowait(msg)
+            except (ValueError, IndexError):
+                break
+
 
 async def main():
-    config = QuicConfiguration(is_client=True)
-    config.load_verify_locations('/tmp/aioquic/examples/cert.pem')
+    if not os.path.exists(CERT_FILE):
+        print('[Client] Certificate not found! Start server first.')
+        return
 
-    print('=== MoQ Pub/Sub Client ===')
-    print('Connecting to server...')
+    config = QuicConfiguration(
+        is_client=True, alpn_protocols=['moqt'],
+        max_data=10000000, max_stream_data=1000000
+    )
+    config.load_verify_locations(CERT_FILE)
 
-    async with connect('127.0.0.1', 4434, configuration=config, create_protocol=MoQClient) as conn:
-        sub_msg = json.dumps({'type': 'subscribe', 'topic': 'dinesh/in'})
-        stream_id = conn._quic.get_next_available_stream_id()
-        conn._quic.send_stream_data(stream_id, sub_msg.encode() + b'\n')
-        print('[Client] Subscribed to topic: dinesh/in')
-        print('[Client] Waiting for messages...\n')
-        await asyncio.sleep(20)
+    print()
+    print('=' * 60)
+    print('  MoQ Transport Subscriber Client')
+    print('  Based on draft-ietf-moq-transport-21')
+    print('=' * 60)
+    print(f'\n[Client] Connecting to {HOST}:{PORT}...')
 
-        msgs = conn.received
-        print(f'\n========== RESULTS ==========')
-        print(f'Total received: {len(msgs)}')
-        if msgs:
-            print(f'First: {msgs[0]}')
-            print(f'Last: {msgs[-1]}')
-            if msgs == list(range(1, len(msgs) + 1)):
-                print('Sequence check: CORRECT (1 to', len(msgs), 'in order)')
-            else:
-                print('Sequence check: OUT OF ORDER')
+    async with connect(HOST, PORT, configuration=config, create_protocol=MoQClient) as qc:
+        print('[Client] Connected')
+        sid = qc._quic.get_next_available_stream_id()
 
-asyncio.run(main())
+        cs = ClientSetup()
+        qc._quic.send_stream_data(sid, cs.encode())
+        print('[Client] CLIENT_SETUP sent')
+
+        m = await asyncio.wait_for(events.get(), timeout=5)
+        print('[Client] SERVER_SETUP received')
+
+        sub = SubscribeRequest(track_namespace=TOPIC, track_name='stream-1',
+                               filter_type=FilterType.LARGEST_OBJECT)
+        qc._quic.send_stream_data(sid, sub.encode())
+        print('[Client] SUBSCRIBE sent')
+
+        m = await asyncio.wait_for(events.get(), timeout=5)
+        print('[Client] SUBSCRIBE_OK received')
+        print('\n[Client] Receiving messages...\n')
+
+        received = []
+        first = last = None
+        for _ in range(10005):
+            try:
+                m = await asyncio.wait_for(events.get(), timeout=30)
+                if m.message_type == MessageType.PUBLISH:
+                    try:
+                        n = int(m.object_payload.decode())
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    received.append(n)
+                    if first is None:
+                        first = n
+                    last = n
+                    qc._quic.send_stream_data(sid, PublishOk(track_namespace=m.track_namespace, track_name=m.track_name).encode())
+                    if n % 1000 == 0 or n == 1 or n == 10000:
+                        print(f'[Client] Received: {n}')
+                elif m.message_type == MessageType.PUBLISH_DONE:
+                    print(f'[Client] PUBLISH_DONE: {m.reason}')
+                    break
+            except asyncio.TimeoutError:
+                print(f'[Client] Timeout at {len(received)} messages')
+                break
+
+        print()
+        print('=' * 60)
+        print('  RESULTS')
+        print('=' * 60)
+        print(f'  Total received: {len(received)}')
+        print(f'  First: {first}')
+        print(f'  Last: {last}')
+        if received == list(range(1, 10001)):
+            print('  Sequence: CORRECT (1 to 10000 in order)')
+        else:
+            print(f'  Sequence: {len(received)}/10000')
+        print('=' * 60)
+        print('  MoQ Protocol: CLIENT_SETUP -> SERVER_SETUP')
+        print('  -> SUBSCRIBE -> SUBSCRIBE_OK -> PUBLISH -> PUBLISH_DONE')
+        print('  No sleep() needed! Subscriber connects anytime.')
+        print('=' * 60)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
