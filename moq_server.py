@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import os
+import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from aioquic.asyncio import QuicConnectionProtocol, serve
@@ -27,11 +28,15 @@ class MoQPublisher(QuicConnectionProtocol):
         self.publish_queue = []
         self.stream_id = None
         self.published_count = 0
+        self.connected = False
+        self.subscribed = False
 
     def quic_event_received(self, event):
         from aioquic.quic.events import StreamDataReceived, HandshakeCompleted
         if isinstance(event, HandshakeCompleted):
+            self.connected = True
             print('[Server] QUIC handshake completed')
+            print('[Server] Connection status: CONNECTED')
         elif isinstance(event, StreamDataReceived):
             self.buf.extend(event.data)
             self._parse(event.stream_id)
@@ -53,6 +58,7 @@ class MoQPublisher(QuicConnectionProtocol):
                 self._quic.send_stream_data(stream_id,
                     ServerSetup(selected_version=MOQT_VERSION_1).encode())
                 print('[Server] SERVER_SETUP sent')
+                print('[Server] MoQ handshake complete!')
 
         elif msg.message_type == MessageType.SUBSCRIBE:
             ns = msg.track_namespace
@@ -60,11 +66,14 @@ class MoQPublisher(QuicConnectionProtocol):
             print(f'[Server] SUBSCRIBE received: namespace={ns}, track={tn}')
             self.subs[tn] = stream_id
             self.stream_id = stream_id
+            self.subscribed = True
 
             self._quic.send_stream_data(stream_id,
                 SubscribeOk(track_namespace=ns, track_name=tn).encode())
             print('[Server] SUBSCRIBE_OK sent')
 
+            sub_count = len(self.subs)
+            print(f'[Server] Active subscribers: {sub_count}')
             print('[Server] Subscriber connected BEFORE publishing started!')
             print(f'[Server] Queuing {TOTAL_MESSAGES} messages for subscriber...')
             self.publish_queue = list(range(1, TOTAL_MESSAGES + 1))
@@ -98,6 +107,21 @@ class MoQPublisher(QuicConnectionProtocol):
             print('[Server] Scenario verified: subscriber received all messages!')
             self.stream_id = None
 
+    def check_status(self):
+        print()
+        print('[Server] --- Status Check ---')
+        print(f'[Server] Connected: {self.connected}')
+        print(f'[Server] Subscribed: {self.subscribed}')
+        print(f'[Server] Active subscribers: {len(self.subs)}')
+        print(f'[Server] Messages queued: {len(self.publish_queue)}')
+        print(f'[Server] Messages published: {self.published_count}/{TOTAL_MESSAGES}')
+        if not self.subs:
+            print('[Server] WARNING: No subscribers! Waiting for subscribers...')
+        else:
+            print('[Server] OK: Subscriber(s) available, publishing to topic')
+        print('[Server] ----------------------')
+        print()
+
 
 async def main():
     if not os.path.exists(CERT_FILE) or not os.path.exists(KEY_FILE):
@@ -129,8 +153,11 @@ async def main():
     print(f'  Protocol: QUIC + MoQT (version 0x{MOQT_VERSION_1:08x})')
     print(f'  ALPN: moqt')
     print()
-    print('  Scenario: Subscriber connects BEFORE publisher publishes')
-    print('  Server waits for SUBSCRIBE before sending any messages')
+    print('  Flow:')
+    print('  1. Wait for subscriber connection')
+    print('  2. Verify subscriber is subscribed')
+    print('  3. Check subscriber availability')
+    print('  4. Publish messages only if subscribers exist')
     print('=' * 60)
     print()
 
