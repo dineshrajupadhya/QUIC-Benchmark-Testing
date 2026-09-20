@@ -54,7 +54,12 @@ async def main():
     print('  MoQ Transport Subscriber Client')
     print('  Based on draft-ietf-moq-transport-21')
     print('=' * 60)
-    print(f'\n[Client] Connecting to {HOST}:{PORT}...')
+    print()
+    print('  Scenario: Subscriber connects BEFORE publisher publishes')
+    print('  Subscriber subscribes first, then receives all messages')
+    print('=' * 60)
+    print()
+    print(f'[Client] Connecting to {HOST}:{PORT}...')
 
     async with connect(HOST, PORT, configuration=config, create_protocol=MoQClient) as qc:
         print('[Client] Connected')
@@ -70,11 +75,12 @@ async def main():
         sub = SubscribeRequest(track_namespace=TOPIC, track_name='stream-1',
                                filter_type=FilterType.LARGEST_OBJECT)
         qc._quic.send_stream_data(sid, sub.encode())
-        print('[Client] SUBSCRIBE sent')
+        print('[Client] SUBSCRIBE sent (subscriber is now ready)')
 
         m = await asyncio.wait_for(events.get(), timeout=5)
         print('[Client] SUBSCRIBE_OK received')
-        print('\n[Client] Receiving messages...\n')
+        print('[Client] Subscriber is subscribed. Waiting for publisher to publish...')
+        print()
 
         received = []
         first = last = None
@@ -92,7 +98,7 @@ async def main():
                     last = n
                     qc._quic.send_stream_data(sid, PublishOk(track_namespace=m.track_namespace, track_name=m.track_name).encode())
                     if n % 1000 == 0 or n == 1 or n == 10000:
-                        print(f'[Client] Received: {n}')
+                        print(f'[Client] Received: {n} ({len(received)}/10000)')
                 elif m.message_type == MessageType.PUBLISH_DONE:
                     print(f'[Client] PUBLISH_DONE: {m.reason}')
                     break
@@ -111,10 +117,22 @@ async def main():
             print('  Sequence: CORRECT (1 to 10000 in order)')
         else:
             print(f'  Sequence: {len(received)}/10000')
-        print('=' * 60)
-        print('  MoQ Protocol: CLIENT_SETUP -> SERVER_SETUP')
-        print('  -> SUBSCRIBE -> SUBSCRIBE_OK -> PUBLISH -> PUBLISH_DONE')
-        print('  No sleep() needed! Subscriber connects anytime.')
+        print()
+        print('  Scenario: Subscriber connected BEFORE publisher')
+        print('  published any messages. Server waited for SUBSCRIBE')
+        print('  then sent all 10000 messages to the subscriber.')
+        print()
+        print('  MoQ Protocol Flow:')
+        print('  Subscriber           Publisher')
+        print('     |                    |')
+        print('     |--- CLIENT_SETUP -->|')
+        print('     |<-- SERVER_SETUP ---|')
+        print('     |--- SUBSCRIBE ----->|')
+        print('     |<-- SUBSCRIBE_OK ---|')
+        print('     |                    | (publisher starts sending)')
+        print('     |<-- PUBLISH (x10000)|')
+        print('     |--- PUBLISH_OK ---> |')
+        print('     |<-- PUBLISH_DONE ---|')
         print('=' * 60)
 
 
