@@ -326,7 +326,60 @@ GitHub: https://github.com/dineshrajupadhya
 
 ---
 
-## References
+## RFC Standards & Compliance
 
-- [RFC 9000 - QUIC Protocol](https://datatracker.ietf.org/doc/html/rfc9000)
+This project implements protocols based on the following RFC standards and drafts:
+
+### QUIC Protocol (Implemented & Tested)
+
+| RFC | Title | Status | Description |
+|-----|-------|--------|-------------|
+| [RFC 9000](https://datatracker.ietf.org/doc/html/rfc9000) | QUIC: A UDP-Based Multiplexed and Secure Transport | **Official RFC** (May 2021) | Core QUIC protocol specification |
+| [RFC 9001](https://datatracker.ietf.org/doc/html/rfc9001) | Using TLS to Secure QUIC | **Official RFC** (May 2021) | TLS 1.3 integration with QUIC |
+| [RFC 9002](https://datatracker.ietf.org/doc/html/rfc9002) | QUIC Loss Detection and Congestion Control | **Official RFC** (May 2021) | Reliability and flow control |
+| [RFC 9003](https://datatracker.ietf.org/doc/html/rfc9003) | Connection Migration in QUIC | **Official RFC** (May 2021) | Connection ID based migration |
+
+### MoQ Transport Protocol (Implemented & Tested)
+
+| Document | Title | Status | Description |
+|----------|-------|--------|-------------|
+| [draft-ietf-moq-transport-21](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/) | Media over QUIC Transport | **Draft** (21st revision) | MoQ transport protocol specification |
+
+**Note:** MoQ (Media over QUIC) is still under development as an IETF draft. It has not yet been published as an official RFC. Our implementation follows the latest available draft (revision 21).
+
+### What is an RFC?
+
+**RFC (Request for Comments)** is the official publication channel for Internet standards. Published by the **IETF (Internet Engineering Task Force)**, RFCs define how protocols should work.
+
+- **Proposed Standard**: New protocol specification
+- **Draft**: Working document, not yet official (like MoQ)
+- **Internet Standard (STD)**: Mature, widely implemented specification
+
+### What is an Internet Draft?
+
+An **Internet Draft** is a working document of the IETF. It is **not** a standard - it is a proposal being developed. `draft-ietf-moq-transport-21` means:
+- `draft` = Working document
+- `ietf` = IETF working group (not individual submission)
+- `moq` = Media over QUIC working group
+- `transport` = Protocol name
+- `21` = 21st revision of this draft
+
+### Our Implementation Compliance
+
+| Component | Standard | Compliance |
+|-----------|----------|------------|
+| QUIC Transport | RFC 9000 | Full compliance via aioquic library |
+| QUIC Security (TLS 1.3) | RFC 9001 | Full compliance via aioquic library |
+| MoQ Handshake | draft-ietf-moq-transport-21 | CLIENT_SETUP/SERVER_SETUP with version negotiation |
+| MoQ Subscribe | draft-ietf-moq-transport-21 | SUBSCRIBE/SUBSCRIBE_OK with namespace and track |
+| MoQ Publish | draft-ietf-moq-transport-21 | PUBLISH/PUBLISH_OK with object delivery |
+| MoQ Varint Encoding | draft-ietf-moq-transport-21 | QUIC-style variable-length integers |
+| MoQ ALPN | draft-ietf-moq-transport-21 | Protocol identifier: "moqt" |
+
+### References
+
+- [IETF QUIC Working Group](https://datatracker.ietf.org/wg/quic/documents/)
+- [IETF MoQ Working Group](https://datatracker.ietf.org/wg/moq/documents/)
+- [RFC Editor](https://www.rfc-editor.org/)
 - [aioquic - Python QUIC Library](https://github.com/aiortc/aioquic)
+- [MoQ Transport Draft](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/)
