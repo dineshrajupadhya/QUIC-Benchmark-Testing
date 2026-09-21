@@ -46,28 +46,25 @@ async def main():
     print('  Based on draft-ietf-moq-transport-21')
     print('=' * 60)
     print()
+    print('  Protocol Flow:')
+    print('  [1/6] Check certificate')
+    print('  [2/6] Connect to server')
+    print('  [3/6] CLIENT_SETUP sent')
+    print('  [4/6] SUBSCRIBE sent')
+    print('  [5/6] Wait for messages')
+    print('  [6/6] Receive all messages')
+    print('=' * 60)
+    print()
 
-    print('[Client] --- Connection Check ---')
-    print(f'[Client] Target server: {HOST}:{PORT}')
-    print(f'[Client] Certificate: {CERT_FILE}')
-
+    print('[Client] [1/6] Checking certificate...')
     if not os.path.exists(CERT_FILE):
         print('[Client] ERROR: Certificate not found!')
-        print('[Client] Cannot connect without valid certificate.')
-        print('[Client] Please generate certificates first:')
-        print('[Client]   mkdir -p /tmp/aioquic/examples')
-        print('[Client]   openssl req -x509 -newkey rsa:4096 \\')
-        print('[Client]     -keyout /tmp/aioquic/examples/key.pem \\')
-        print('[Client]     -out /tmp/aioquic/examples/cert.pem \\')
-        print('[Client]     -days 365 -nodes -subj \'/CN=localhost\'')
+        print('[Client] Please generate certificates first.')
         return
-
     print('[Client] Certificate found: OK')
-    print('[Client] ------------------------')
-    print()
 
-    print('[Client] Attempting to connect to publisher...')
     print()
+    print('[Client] [2/6] Connecting to ' + HOST + ':' + str(PORT) + '...')
 
     config = QuicConfiguration(
         is_client=True, alpn_protocols=['moqt'],
@@ -75,120 +72,97 @@ async def main():
     )
     config.load_verify_locations(CERT_FILE)
 
-    try:
-        async with connect(HOST, PORT, configuration=config, create_protocol=MoQClient) as qc:
-            print('[Client] --- Connection Established ---')
-            print(f'[Client] Connected to {HOST}:{PORT}')
-            print('[Client] QUIC handshake: SUCCESS')
-            print('[Client] --------------------------------')
-            print()
+    async with connect(HOST, PORT, configuration=config, create_protocol=MoQClient) as qc:
+        print('[Client] Connection established!')
+        print('[Client] QUIC handshake: SUCCESS')
 
-            sid = qc._quic.get_next_available_stream_id()
+        sid = qc._quic.get_next_available_stream_id()
 
-            cs = ClientSetup()
-            qc._quic.send_stream_data(sid, cs.encode())
-            print('[Client] CLIENT_SETUP sent')
+        print()
+        print('[Client] [3/6] Sending CLIENT_SETUP...')
+        cs = ClientSetup()
+        qc._quic.send_stream_data(sid, cs.encode())
 
-            m = await asyncio.wait_for(events.get(), timeout=5)
-            print('[Client] SERVER_SETUP received')
-            print('[Client] MoQ handshake: COMPLETE')
-            print()
+        m = await asyncio.wait_for(events.get(), timeout=5)
+        print('[Client] SERVER_SETUP received')
+        print('[Client] MoQ version negotiation: COMPLETE')
 
-            print('[Client] --- Subscribe Check ---')
-            print(f'[Client] Topic: {TOPIC}')
-            print(f'[Client] Track: stream-1')
-            print(f'[Client] Filter: LATEST')
-            sub = SubscribeRequest(track_namespace=TOPIC, track_name='stream-1',
-                                   filter_type=FilterType.LARGEST_OBJECT)
-            qc._quic.send_stream_data(sid, sub.encode())
-            print('[Client] SUBSCRIBE sent')
+        print()
+        print('[Client] [4/6] Sending SUBSCRIBE...')
+        sub = SubscribeRequest(track_namespace=TOPIC, track_name='stream-1',
+                               filter_type=FilterType.LARGEST_OBJECT)
+        qc._quic.send_stream_data(sid, sub.encode())
 
-            m = await asyncio.wait_for(events.get(), timeout=5)
-            print('[Client] SUBSCRIBE_OK received')
-            print('[Client] Subscription status: ACTIVE')
-            print('[Client] -------------------------')
-            print()
-            print('[Client] Waiting for publisher to publish messages...')
-            print()
+        m = await asyncio.wait_for(events.get(), timeout=5)
+        print('[Client] SUBSCRIBE_OK received')
+        print('[Client] Subscription status: ACTIVE')
 
-            received = []
-            first = last = None
-            start_time = time.time()
-            for _ in range(10005):
-                try:
-                    m = await asyncio.wait_for(events.get(), timeout=30)
-                    if m.message_type == MessageType.PUBLISH:
-                        try:
-                            n = int(m.object_payload.decode())
-                        except (ValueError, UnicodeDecodeError):
-                            continue
-                        received.append(n)
-                        if first is None:
-                            first = n
-                            elapsed = time.time() - start_time
-                            print(f'[Client] First message received in {elapsed:.3f}s')
-                        last = n
-                        qc._quic.send_stream_data(sid, PublishOk(track_namespace=m.track_namespace, track_name=m.track_name).encode())
-                        if n % 1000 == 0 or n == 1 or n == 10000:
-                            print(f'[Client] Received: {n} ({len(received)}/10000)')
-                    elif m.message_type == MessageType.PUBLISH_DONE:
-                        print(f'[Client] PUBLISH_DONE: {m.reason}')
-                        break
-                except asyncio.TimeoutError:
-                    print(f'[Client] Timeout at {len(received)} messages')
+        print()
+        print('[Client] [5/6] Waiting for publisher to send messages...')
+        print()
+
+        received = []
+        first = last = None
+        start_time = time.time()
+        step6_printed = False
+
+        for _ in range(10005):
+            try:
+                m = await asyncio.wait_for(events.get(), timeout=30)
+                if m.message_type == MessageType.PUBLISH:
+                    try:
+                        n = int(m.object_payload.decode())
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    received.append(n)
+                    if first is None:
+                        first = n
+                        elapsed = time.time() - start_time
+                        print('[Client] [6/6] Receiving messages...')
+                        print('[Client] First message received in ' + '{:.3f}'.format(elapsed) + 's')
+                        step6_printed = True
+                    last = n
+                    qc._quic.send_stream_data(sid, PublishOk(track_namespace=m.track_namespace, track_name=m.track_name).encode())
+                    if n % 1000 == 0 or n == 1 or n == 10000:
+                        print('[Client] Received: ' + str(n) + ' (' + str(len(received)) + '/10000)')
+                elif m.message_type == MessageType.PUBLISH_DONE:
+                    print('[Client] PUBLISH_DONE: ' + m.reason)
                     break
+            except asyncio.TimeoutError:
+                print('[Client] Timeout at ' + str(len(received)) + ' messages')
+                break
 
-            elapsed = time.time() - start_time
-            print()
-            print('=' * 60)
-            print('  RESULTS')
-            print('=' * 60)
-            print(f'  Total received: {len(received)}')
-            print(f'  First: {first}')
-            print(f'  Last: {last}')
-            print(f'  Time taken: {elapsed:.3f}s')
-            if elapsed > 0:
-                print(f'  Throughput: {len(received)/elapsed:.0f} messages/sec')
-            if received == list(range(1, 10001)):
-                print('  Sequence: CORRECT (1 to 10000 in order)')
-            else:
-                print(f'  Sequence: {len(received)}/10000')
-            print()
-            print('  Scenario: Subscriber connected BEFORE publisher')
-            print('  published any messages. Server waited for SUBSCRIBE')
-            print('  then sent all 10000 messages to the subscriber.')
-            print()
-            print('  MoQ Protocol Flow:')
-            print('  Subscriber           Publisher')
-            print('     |                    |')
-            print('     |-- Check Conn ----->|')
-            print('     |<-- Conn OK --------|')
-            print('     |--- CLIENT_SETUP -->|')
-            print('     |<-- SERVER_SETUP ---|')
-            print('     |-- Check Sub ------>|')
-            print('     |<-- Sub OK ---------|')
-            print('     |--- SUBSCRIBE ----->|')
-            print('     |<-- SUBSCRIBE_OK ---|')
-            print('     |-- Check Pub ----->|')
-            print('     |<-- Pub OK ---------|')
-            print('     |                    | (publisher starts sending)')
-            print('     |<-- PUBLISH (x10000)|')
-            print('     |--- PUBLISH_OK ---> |')
-            print('     |<-- PUBLISH_DONE ---|')
-            print('=' * 60)
-
-    except Exception as e:
+        elapsed = time.time() - start_time
         print()
-        print('[Client] --- Connection Failed ---')
-        print(f'[Client] Error: {e}')
-        print('[Client] Status: NOT CONNECTED')
-        print('[Client] Please check:')
-        print('[Client]   1. Is the server running?')
-        print('[Client]   2. Are certificates valid?')
-        print('[Client]   3. Is port 4434 available?')
-        print('[Client] --------------------------------')
+        print('=' * 60)
+        print('  RESULTS')
+        print('=' * 60)
+        print('  Total received: ' + str(len(received)))
+        print('  First: ' + str(first))
+        print('  Last: ' + str(last))
+        print('  Time taken: ' + '{:.3f}'.format(elapsed) + 's')
+        if elapsed > 0:
+            print('  Throughput: ' + str(int(len(received)/elapsed)) + ' messages/sec')
+        if received == list(range(1, 10001)):
+            print('  Sequence: CORRECT (1 to 10000 in order)')
+        else:
+            print('  Sequence: ' + str(len(received)) + '/10000')
         print()
-        print('[Client] Retry? Start server first, then run this client again.')
+        print('  MoQ Protocol Flow (Completed):')
+        print('  Subscriber           Publisher')
+        print('     |                    |')
+        print('     |-- [1] Check Conn ->|')
+        print('     |<-- Conn OK --------|')
+        print('     |-- [2] CLIENT_SETUP>|')
+        print('     |<-- SERVER_SETUP ---|')
+        print('     |-- [3] SUBSCRIBE -->|')
+        print('     |<-- SUBSCRIBE_OK ---|')
+        print('     |-- [4] Wait Pub --->|')
+        print('     |<-- PUBLISH (x10000)|')
+        print('     |-- PUBLISH_OK ----> |')
+        print('     |<-- PUBLISH_DONE ---|')
+        print('     |-- [5] Complete --->|')
+        print('=' * 60)
 
 
 if __name__ == '__main__':

@@ -35,8 +35,9 @@ class MoQPublisher(QuicConnectionProtocol):
         from aioquic.quic.events import StreamDataReceived, HandshakeCompleted
         if isinstance(event, HandshakeCompleted):
             self.connected = True
-            print('[Server] QUIC handshake completed')
+            print('[Server] [1/6] QUIC handshake completed')
             print('[Server] Connection status: CONNECTED')
+            print()
         elif isinstance(event, StreamDataReceived):
             self.buf.extend(event.data)
             self._parse(event.stream_id)
@@ -54,30 +55,32 @@ class MoQPublisher(QuicConnectionProtocol):
     def _handle(self, msg, stream_id):
         if msg.message_type == MessageType.CLIENT_SETUP:
             if MOQT_VERSION_1 in msg.supported_versions:
-                print('[Server] CLIENT_SETUP received')
                 self._quic.send_stream_data(stream_id,
                     ServerSetup(selected_version=MOQT_VERSION_1).encode())
-                print('[Server] SERVER_SETUP sent')
-                print('[Server] MoQ handshake complete!')
+                print('[Server] [2/6] CLIENT_SETUP received')
+                print('[Server] [3/6] SERVER_SETUP sent')
+                print('[Server] MoQ version negotiation complete')
+                print()
 
         elif msg.message_type == MessageType.SUBSCRIBE:
             ns = msg.track_namespace
             tn = msg.track_name
-            print(f'[Server] SUBSCRIBE received: namespace={ns}, track={tn}')
             self.subs[tn] = stream_id
             self.stream_id = stream_id
             self.subscribed = True
 
             self._quic.send_stream_data(stream_id,
                 SubscribeOk(track_namespace=ns, track_name=tn).encode())
-            print('[Server] SUBSCRIBE_OK sent')
-
-            sub_count = len(self.subs)
-            print(f'[Server] Active subscribers: {sub_count}')
-            print('[Server] Subscriber connected BEFORE publishing started!')
-            print(f'[Server] Queuing {TOTAL_MESSAGES} messages for subscriber...')
+            print('[Server] [4/6] SUBSCRIBE received: ' + ns + '/' + tn)
+            print('[Server] [5/6] SUBSCRIBE_OK sent')
+            print('[Server] Active subscribers: ' + str(len(self.subs)))
+            print('[Server] Subscriber verified!')
+            print()
+            print('[Server] Queuing ' + str(TOTAL_MESSAGES) + ' messages...')
             self.publish_queue = list(range(1, TOTAL_MESSAGES + 1))
-            print(f'[Server] {len(self.publish_queue)} messages queued, publishing begins!')
+            print('[Server] ' + str(len(self.publish_queue)) + ' messages ready')
+            print('[Server] [6/6] Publishing begins!')
+            print()
 
         elif msg.message_type == MessageType.PUBLISH_OK:
             pass
@@ -95,7 +98,7 @@ class MoQPublisher(QuicConnectionProtocol):
             sent += 1
             self.published_count += 1
             if i % 1000 == 0 or i == 1 or i == TOTAL_MESSAGES:
-                print(f'[Server] Published: {i} ({self.published_count}/{TOTAL_MESSAGES})')
+                print('[Server] Published: ' + str(i) + ' (' + str(self.published_count) + '/' + str(TOTAL_MESSAGES) + ')')
 
         if not self.publish_queue and self.stream_id is not None:
             d = PublishDone(
@@ -103,24 +106,12 @@ class MoQPublisher(QuicConnectionProtocol):
                 error_code=ErrorCode.NO_ERROR, reason='All messages published'
             )
             self._quic.send_stream_data(self.stream_id, d.encode())
-            print(f'[Server] Done! Published {self.published_count} messages.')
-            print('[Server] Scenario verified: subscriber received all messages!')
+            print()
+            print('=' * 60)
+            print('[Server] Done! Published ' + str(self.published_count) + ' messages.')
+            print('[Server] PUBLISH_DONE sent to subscriber')
+            print('=' * 60)
             self.stream_id = None
-
-    def check_status(self):
-        print()
-        print('[Server] --- Status Check ---')
-        print(f'[Server] Connected: {self.connected}')
-        print(f'[Server] Subscribed: {self.subscribed}')
-        print(f'[Server] Active subscribers: {len(self.subs)}')
-        print(f'[Server] Messages queued: {len(self.publish_queue)}')
-        print(f'[Server] Messages published: {self.published_count}/{TOTAL_MESSAGES}')
-        if not self.subs:
-            print('[Server] WARNING: No subscribers! Waiting for subscribers...')
-        else:
-            print('[Server] OK: Subscriber(s) available, publishing to topic')
-        print('[Server] ----------------------')
-        print()
 
 
 async def main():
@@ -147,23 +138,26 @@ async def main():
     print('  MoQ Transport Publisher Server')
     print('  Based on draft-ietf-moq-transport-21')
     print('=' * 60)
-    print(f'  Topic: {TOPIC}')
-    print(f'  Messages: 1-{TOTAL_MESSAGES}')
-    print(f'  Listening on: {HOST}:{PORT}')
-    print(f'  Protocol: QUIC + MoQT (version 0x{MOQT_VERSION_1:08x})')
-    print(f'  ALPN: moqt')
     print()
-    print('  Flow:')
-    print('  1. Wait for subscriber connection')
-    print('  2. Verify subscriber is subscribed')
-    print('  3. Check subscriber availability')
-    print('  4. Publish messages only if subscribers exist')
+    print('  Topic: ' + TOPIC)
+    print('  Messages: 1-' + str(TOTAL_MESSAGES))
+    print('  Listening on: ' + HOST + ':' + str(PORT))
+    print('  Protocol: QUIC + MoQT (version 0x00000001)')
+    print('  ALPN: moqt')
+    print()
+    print('  Protocol Flow:')
+    print('  [1/6] QUIC handshake')
+    print('  [2/6] CLIENT_SETUP received')
+    print('  [3/6] SERVER_SETUP sent')
+    print('  [4/6] SUBSCRIBE received')
+    print('  [5/6] SUBSCRIBE_OK sent')
+    print('  [6/6] Publish messages')
     print('=' * 60)
     print()
 
     await serve(HOST, PORT, configuration=config, create_protocol=MoQPublisher)
-    print(f'[Server] Started on {HOST}:{PORT}')
-    print('[Server] Waiting for subscriber to connect and subscribe...')
+    print('[Server] Started on ' + HOST + ':' + str(PORT))
+    print('[Server] Waiting for subscriber to connect...')
     print()
 
     try:
